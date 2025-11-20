@@ -15,6 +15,33 @@ const updateProfileSchema = z.object({
 })
 
 /**
+ * GET /api/profiles/username-available/:username
+ * Check if username is available (PUBLIC endpoint - no auth required)
+ */
+router.get('/username-available/:username', asyncHandler(async (req: express.Request, res) => {
+  const { username } = req.params
+
+  if (!username || username.length < 3) {
+    return res.json({ available: false, message: 'Username must be at least 3 characters' })
+  }
+
+  const { data: existingProfile, error } = await supabase
+    .from('profiles')
+    .select('id')
+    .eq('username', username.toLowerCase())
+    .maybeSingle()
+
+  if (error) {
+    throw createError(500, 'Failed to check username availability')
+  }
+
+  res.json({ 
+    available: !existingProfile,
+    message: existingProfile ? 'Username is already taken' : 'Username is available'
+  })
+}))
+
+/**
  * GET /api/profiles/me
  * Get current user's profile
  */

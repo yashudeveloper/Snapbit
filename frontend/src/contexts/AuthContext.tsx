@@ -7,7 +7,7 @@ interface AuthContextType {
   profile: Profile | null
   session: Session | null
   loading: boolean
-  signIn: (email: string, password: string) => Promise<{ error?: any }>
+  signIn: (emailOrUsername: string, password: string) => Promise<{ error?: any }>
   signUp: (email: string, password: string, username: string, displayName: string, additionalData?: {
     dateOfBirth?: string
     gender?: string
@@ -39,109 +39,38 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(null)
   const [loading, setLoading] = useState(true)
 
-  // FUCK SUPABASE CLIENT - RAW FETCH API ONLY!
+  // Fetch user profile from Supabase
   const fetchProfile = async (userId: string) => {
-    console.log('🚀 FUCK IT - DIRECT API CALL FOR:', userId)
+    console.log('🔍 Fetching profile for user:', userId)
     
-    // HARDCODED TOKEN FROM STORAGE
-    let token = null
     try {
-      const sessionData = localStorage.getItem('sb-idxahvulzazdjhikehvu-auth-token')
-      if (sessionData) {
-        const parsed = JSON.parse(sessionData)
-        token = parsed?.access_token
-        console.log('🔑 Token from localStorage:', token ? 'FOUND' : 'NOT FOUND')
-      }
-    } catch (e) {
-      console.log('❌ Failed to get token from localStorage')
-    }
+      // Use Supabase client directly - it handles auth automatically
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('id', userId)
+        .single()
 
-    // If no token from localStorage, try session
-    if (!token) {
-      try {
-        const { data: { session } } = await supabase.auth.getSession()
-        token = session?.access_token
-        console.log('🔑 Token from session:', token ? 'FOUND' : 'NOT FOUND')
-      } catch (e) {
-        console.log('❌ Failed to get session')
+      if (error) {
+        console.error('❌ Profile fetch error:', error)
+        throw error
       }
-    }
 
-    // FUCK IT - TRY WITHOUT TOKEN FIRST
-    console.log('📡 ATTEMPTING API CALL WITHOUT AUTH...')
-    try {
-      const url = `https://idxahvulzazdjhikehvu.supabase.co/rest/v1/profiles?id=eq.${userId}&select=*`
-      console.log('🌐 URL:', url)
-      
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkeGFodnVsemF6ZGpoaWtlaHZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIyNzMyNTMsImV4cCI6MjA3Nzg0OTI1M30.Oxu5_TEYJevW56ZkSFv7AbbFBQGF2d1f74ypDTpgj1I',
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        }
-      })
-      
-      console.log('📡 Response status (no auth):', response.status)
-      
-      if (response.ok) {
-        const data = await response.json()
-        console.log('📦 SUCCESS WITHOUT AUTH:', data)
-        
-        if (data && data.length > 0) {
-          console.log('✅ PROFILE LOADED (NO AUTH)!')
-          setProfile(data[0])
-          setLoading(false)
-          return
-        }
+      if (data) {
+        console.log('✅ Profile loaded successfully:', data.username)
+        setProfile(data)
+      } else {
+        console.error('❌ No profile found for user')
       }
-    } catch (e) {
-      console.log('❌ No auth attempt failed:', e)
+    } catch (error) {
+      console.error('💥 Failed to fetch profile:', error)
+    } finally {
+      setLoading(false)
     }
-
-    // NOW TRY WITH TOKEN
-    if (token) {
-      console.log('📡 ATTEMPTING API CALL WITH AUTH TOKEN...')
-      try {
-        const url = `https://idxahvulzazdjhikehvu.supabase.co/rest/v1/profiles?id=eq.${userId}&select=*`
-        
-        const response = await fetch(url, {
-          method: 'GET',
-          headers: {
-            'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImlkeGFodnVsemF6ZGpoaWtlaHZ1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjIyNzMyNTMsImV4cCI6MjA3Nzg0OTI1M30.Oxu5_TEYJevW56ZkSFv7AbbFBQGF2d1f74ypDTpgj1I',
-            'Authorization': `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          }
-        })
-        
-        console.log('📡 Response status (with auth):', response.status)
-        
-        if (response.ok) {
-          const data = await response.json()
-          console.log('📦 SUCCESS WITH AUTH:', data)
-          
-          if (data && data.length > 0) {
-            console.log('✅ PROFILE LOADED (WITH AUTH)!')
-            setProfile(data[0])
-            setLoading(false)
-            return
-          }
-        } else {
-          const errorText = await response.text()
-          console.error('❌ AUTH ERROR:', response.status, errorText)
-        }
-      } catch (e) {
-        console.error('💥 AUTH ATTEMPT FAILED:', e)
-      }
-    }
-
-    console.error('💀 ALL ATTEMPTS FAILED - NO PROFILE LOADED')
-    setLoading(false)
   }
 
   useEffect(() => {
-    console.log('🚀 AuthProvider INIT')
+    console.log('🚀 AuthProvider initializing...')
     let isActive = true
 
     const initialize = async () => {
@@ -149,20 +78,20 @@ export function AuthProvider({ children }: AuthProviderProps) {
         // Get session
         console.log('1️⃣ Getting session...')
         const { data: { session } } = await supabase.auth.getSession()
-        console.log('2️⃣ Session:', session ? '✅ EXISTS' : '❌ NONE')
+        console.log('2️⃣ Session:', session ? `✅ User: ${session.user?.email}` : '❌ No session')
         
         if (!isActive) return
 
-      setSession(session)
-      setUser(session?.user ?? null)
+        setSession(session)
+        setUser(session?.user ?? null)
 
-      if (session?.user) {
-          console.log('3️⃣ Calling fetchProfile...')
+        if (session?.user) {
+          console.log('3️⃣ Fetching profile for user:', session.user.id)
           await fetchProfile(session.user.id)
-      } else {
-          console.log('3️⃣ No user, setting loading false')
-        setLoading(false)
-      }
+        } else {
+          console.log('3️⃣ No user session, ready for login/signup')
+          setLoading(false)
+        }
       } catch (err) {
         console.error('💥 Init error:', err)
         if (isActive) setLoading(false)
@@ -174,41 +103,90 @@ export function AuthProvider({ children }: AuthProviderProps) {
     // Auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
-        console.log('🔔 Auth event:', event)
+        console.log('🔔 Auth event:', event, session?.user?.email || 'no user')
         
         if (!isActive) return
 
-      setSession(session)
-      setUser(session?.user ?? null)
+        setSession(session)
+        setUser(session?.user ?? null)
       
         if (event === 'SIGNED_IN' && session?.user) {
-        await fetchProfile(session.user.id)
+          console.log('✅ User signed in, fetching profile...')
+          await fetchProfile(session.user.id)
         } else if (event === 'SIGNED_OUT') {
-        setProfile(null)
-        setLoading(false)
-      }
+          console.log('👋 User signed out')
+          setProfile(null)
+          setLoading(false)
+        }
       }
     )
 
     return () => {
-      console.log('🧹 Cleanup')
+      console.log('🧹 AuthProvider cleanup')
       isActive = false
       subscription.unsubscribe()
     }
   }, [])
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = async (emailOrUsername: string, password: string) => {
     try {
       setLoading(true)
+      console.log('🔐 SignIn attempt:', emailOrUsername)
+      
+      let email = emailOrUsername
+      
+      // If input doesn't contain @, treat it as username and look up email
+      if (!emailOrUsername.includes('@')) {
+        console.log('🔍 Looking up email for username:', emailOrUsername)
+        const { data, error } = await supabase
+          .from('profiles')
+          .select('email')
+          .eq('username', emailOrUsername.toLowerCase())
+          .single()
+        
+        if (error || !data) {
+          console.log('❌ Username not found')
+          setLoading(false)
+          return { 
+            error: { 
+              message: 'Username not found. Please check your username or try signing in with email.',
+              status: 401
+            } 
+          }
+        }
+        
+        email = data.email
+        console.log('✅ Found email for username')
+      }
+      
+      console.log('🔐 Attempting sign in with email:', email)
       const { error } = await supabase.auth.signInWithPassword({
         email,
         password,
       })
-      return { error }
-    } catch (error) {
-      return { error }
-    } finally {
+      
+      if (error) {
+        console.log('❌ Sign in failed:', error.message)
+        setLoading(false)
+        return { 
+          error: { 
+            message: 'Invalid password. Please check your password and try again.',
+            status: 401
+          } 
+        }
+      }
+      
+      console.log('✅ Sign in successful!')
+      return { error: null }
+    } catch (error: any) {
+      console.error('💥 Sign in exception:', error)
       setLoading(false)
+      return { 
+        error: { 
+          message: error?.message || 'Network error. Please check your connection and try again.',
+          status: 500
+        } 
+      }
     }
   }
 

@@ -14,7 +14,7 @@ const signUpSchema = z.object({
 })
 
 const signInSchema = z.object({
-  email: z.string().email(),
+  emailOrUsername: z.string().min(1),
   password: z.string().min(1)
 })
 
@@ -93,7 +93,7 @@ router.post('/signup', asyncHandler(async (req, res) => {
 
 /**
  * POST /api/auth/signin
- * Sign in with email and password
+ * Sign in with email/username and password
  */
 router.post('/signin', asyncHandler(async (req, res) => {
   const validationResult = signInSchema.safeParse(req.body)
@@ -101,15 +101,40 @@ router.post('/signin', asyncHandler(async (req, res) => {
     throw createError(400, 'Invalid request data', 'VALIDATION_ERROR')
   }
 
-  const { email, password } = validationResult.data
+  const { emailOrUsername, password } = validationResult.data
+  
+  let email = emailOrUsername
 
+  // If input doesn't contain @, treat it as username and look up email
+  if (!emailOrUsername.includes('@')) {
+    console.log(`🔍 Looking up email for username: ${emailOrUsername}`)
+    const { data: profile, error: profileError } = await supabase
+      .from('profiles')
+      .select('email')
+      .eq('username', emailOrUsername.toLowerCase())
+      .single()
+
+    if (profileError || !profile) {
+      console.log(`❌ Username not found: ${emailOrUsername}`)
+      throw createError(401, 'Invalid username or password')
+    }
+    
+    email = profile.email
+    console.log(`✅ Found email for username: ${emailOrUsername}`)
+  }
+
+  console.log(`🔐 Attempting to sign in with email: ${email}`)
   const { data, error } = await supabase.auth.signInWithPassword({
     email,
     password
   })
 
   if (error) {
-    throw createError(401, 'Invalid email or password')
+    console.log(`❌ Sign in failed:`, error.message)
+    if (error.message.includes('Invalid login credentials')) {
+      throw createError(401, 'Invalid email/username or password')
+    }
+    throw createError(401, error.message)
   }
 
   if (!data.user || !data.session) {
@@ -126,6 +151,8 @@ router.post('/signin', asyncHandler(async (req, res) => {
   if (profileError || !profile) {
     throw createError(500, 'Failed to fetch user profile')
   }
+
+  console.log(`✅ Sign in successful for user: ${profile.username}`)
 
   res.json({
     message: 'Signed in successfully',
