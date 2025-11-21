@@ -163,21 +163,22 @@ function CreateHabitModal({ onClose, onCreate }: CreateHabitModalProps) {
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end">
-      <div className="w-full bg-snapchat-gray-900 rounded-t-3xl animate-slide-up max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-end sm:items-center sm:justify-center">
+      <div className="w-full sm:max-w-md bg-snapchat-gray-900 rounded-t-3xl sm:rounded-3xl animate-slide-up max-h-[90vh] overflow-y-auto flex flex-col">
         {/* Header */}
-        <div className="flex items-center justify-between p-6 border-b border-snapchat-gray-800">
+        <div className="flex items-center justify-between p-6 border-b border-snapchat-gray-800 flex-shrink-0 sticky top-0 bg-snapchat-gray-900 z-10">
           <h2 className="text-xl font-bold text-white">Create New Habit</h2>
           <button
             onClick={onClose}
-            className="p-2 rounded-full bg-snapchat-gray-800 text-white"
+            className="p-2 rounded-full bg-snapchat-gray-800 text-white hover:bg-snapchat-gray-700 transition-colors"
+            aria-label="Close modal"
           >
             ×
           </button>
         </div>
 
         {/* Form */}
-        <form onSubmit={handleSubmit} className="p-6 space-y-6">
+        <form onSubmit={handleSubmit} className="p-6 space-y-6 flex-1">
           {/* Title */}
           <div>
             <label className="block text-white font-medium mb-2">Habit Title</label>
@@ -258,13 +259,15 @@ function CreateHabitModal({ onClose, onCreate }: CreateHabitModalProps) {
           </div>
 
           {/* Submit Button */}
-          <button
-            type="submit"
-            disabled={!formData.title.trim() || isSubmitting}
-            className="w-full py-4 bg-snapchat-yellow text-black font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-opacity"
-          >
-            {isSubmitting ? 'Creating...' : 'Create Habit'}
-          </button>
+          <div className="pb-6">
+            <button
+              type="submit"
+              disabled={!formData.title.trim() || isSubmitting}
+              className="w-full py-4 bg-snapchat-yellow text-black font-semibold rounded-xl disabled:opacity-50 disabled:cursor-not-allowed transition-opacity hover:bg-yellow-400 active:scale-95"
+            >
+              {isSubmitting ? 'Creating...' : 'Create Habit'}
+            </button>
+          </div>
         </form>
       </div>
     </div>

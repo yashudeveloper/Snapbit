@@ -16,6 +16,141 @@ const searchFriendsSchema = z.object({
 })
 
 /**
+ * GET /api/friends/suggestions
+ * Get friend suggestions based on habits, location, and occupation
+ */
+router.get('/suggestions', asyncHandler(async (req: AuthenticatedRequest, res) => {
+  if (!req.user) {
+    throw createError(401, 'Authentication required')
+  }
+
+  const limit = parseInt(req.query.limit as string) || 10
+
+  console.log('🔍 Finding friend suggestions for user:', req.user.id)
+
+  // Get current user's profile
+  const { data: currentProfile, error: profileError } = await supabase
+    .from('profiles')
+    .select('occupation, location')
+    .eq('id', req.user.id)
+    .single()
+
+  if (profileError) {
+    throw createError(500, 'Failed to fetch user profile')
+  }
+
+  // Get current user's habits
+  const { data: userHabits } = await supabase
+    .from('habits')
+    .select('category')
+    .eq('user_id', req.user.id)
+    .eq('is_active', true)
+
+  const userHabitCategories = userHabits?.map(h => h.category) || []
+
+  // Get existing friendships to exclude them
+  const { data: existingFriendships } = await supabase
+    .from('friendships')
+    .select('requester_id, addressee_id')
+    .or(`requester_id.eq.${req.user.id},addressee_id.eq.${req.user.id}`)
+
+  const excludeIds = [req.user.id]
+  existingFriendships?.forEach(f => {
+    const friendId = f.requester_id === req.user!.id ? f.addressee_id : f.requester_id
+    excludeIds.push(friendId)
+  })
+
+  // Find users with similar attributes
+  let query = supabase
+    .from('profiles')
+    .select('id, username, display_name, avatar_url, snap_score, current_streak, occupation, location')
+    .not('id', 'in', `(${excludeIds.join(',')})`)
+    .eq('ghost_mode', false)
+
+  const suggestions: any[] = []
+
+  // First, try to find users with matching occupation or location
+  if (currentProfile.occupation || currentProfile.location) {
+    let orConditions = []
+    if (currentProfile.occupation) {
+      orConditions.push(`occupation.eq.${currentProfile.occupation}`)
+    }
+    if (currentProfile.location) {
+      orConditions.push(`location.ilike.%${currentProfile.location}%`)
+    }
+    
+    const { data: matchingUsers } = await query
+      .or(orConditions.join(','))
+      .order('snap_score', { ascending: false })
+      .limit(limit * 2)
+
+    if (matchingUsers) {
+      suggestions.push(...matchingUsers)
+    }
+  }
+
+  // Then find users with similar habits
+  if (userHabitCategories.length > 0) {
+    const { data: habitsData } = await supabase
+      .from('habits')
+      .select('user_id, category')
+      .in('category', userHabitCategories)
+      .eq('is_active', true)
+      .not('user_id', 'in', `(${excludeIds.join(',')})`)
+
+    if (habitsData) {
+      // Count matching habits per user
+      const habitMatches: Record<string, number> = {}
+      habitsData.forEach(h => {
+        habitMatches[h.user_id] = (habitMatches[h.user_id] || 0) + 1
+      })
+
+      // Get top matching users
+      const topMatchUserIds = Object.entries(habitMatches)
+        .sort(([, a], [, b]) => b - a)
+        .slice(0, limit)
+        .map(([userId]) => userId)
+
+      if (topMatchUserIds.length > 0) {
+        const { data: habitMatchUsers } = await supabase
+          .from('profiles')
+          .select('id, username, display_name, avatar_url, snap_score, current_streak, occupation, location')
+          .in('id', topMatchUserIds)
+          .eq('ghost_mode', false)
+
+        if (habitMatchUsers) {
+          suggestions.push(...habitMatchUsers)
+        }
+      }
+    }
+  }
+
+  // Remove duplicates and limit results
+  const uniqueSuggestions = Array.from(
+    new Map(suggestions.map(s => [s.id, s])).values()
+  ).slice(0, limit)
+
+  console.log('✅ Found suggestions:', uniqueSuggestions.length)
+
+  res.json({ 
+    suggestions: uniqueSuggestions.map(user => ({
+      id: user.id,
+      username: user.username,
+      displayName: user.display_name,
+      avatarUrl: user.avatar_url,
+      snapScore: user.snap_score,
+      currentStreak: user.current_streak,
+      occupation: user.occupation,
+      location: user.location,
+      matchReason: currentProfile.occupation === user.occupation ? 'Same occupation' :
+                   currentProfile.location && user.location?.includes(currentProfile.location) ? 'Same location' :
+                   'Similar habits'
+    })),
+    total: uniqueSuggestions.length
+  })
+}))
+
+/**
  * GET /api/friends/search
  * Search for users to add as friends
  */

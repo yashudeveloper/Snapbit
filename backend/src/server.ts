@@ -64,6 +64,57 @@ app.use('/uploads', express.static('uploads'))
 // Rate limiting
 app.use(rateLimiter)
 
+// Root endpoint - API documentation
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Snapbit API',
+    version: '1.0.0',
+    description: 'Habit tracking with friends - Backend API',
+    status: 'running',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      health: 'GET /health',
+      auth: {
+        signup: 'POST /api/auth/signup',
+        login: 'POST /api/auth/login',
+        logout: 'POST /api/auth/logout'
+      },
+      profiles: {
+        me: 'GET /api/profiles/me',
+        update: 'PUT /api/profiles/me',
+        byUsername: 'GET /api/profiles/:username'
+      },
+      habits: {
+        list: 'GET /api/habits',
+        create: 'POST /api/habits',
+        update: 'PUT /api/habits/:id',
+        delete: 'DELETE /api/habits/:id'
+      },
+      snaps: {
+        create: 'POST /api/snaps',
+        list: 'GET /api/snaps',
+        verify: 'POST /api/snaps/:id/verify'
+      },
+      friends: {
+        list: 'GET /api/friends',
+        request: 'POST /api/friends/request',
+        accept: 'PUT /api/friends/:id/accept',
+        streaks: 'GET /api/friends/streaks'
+      },
+      chat: {
+        rooms: 'GET /api/chat/rooms',
+        messages: 'GET /api/chat/:roomId/messages',
+        send: 'POST /api/chat/:roomId/messages'
+      },
+      leaderboard: 'GET /api/leaderboard',
+      snapFeed: 'GET /api/snap-feed',
+      streaks: 'GET /api/streaks'
+    },
+    websocket: 'ws://localhost:' + PORT,
+    docs: 'https://github.com/yashudeveloper/Snapbit'
+  })
+})
+
 // Health check endpoint
 app.get('/health', (req, res) => {
   res.json({
@@ -76,6 +127,9 @@ app.get('/health', (req, res) => {
 
 // API routes
 app.use('/api/auth', authRoutes)
+// Public profile routes (username availability check)
+app.get('/api/profiles/username-available/:username', profileRoutes)
+// Protected profile routes
 app.use('/api/profiles', authMiddleware, profileRoutes)
 app.use('/api/habits', authMiddleware, habitRoutes)
 app.use('/api/snaps', authMiddleware, snapRoutes)

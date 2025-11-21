@@ -1,11 +1,14 @@
 import React, { useState } from 'react'
 import { motion, AnimatePresence } from 'framer-motion'
-import { Eye, EyeOff, ChevronRight, Calendar, MapPin, ArrowLeft } from 'lucide-react'
+import { Eye, EyeOff, ChevronRight, Calendar, MapPin, ArrowLeft, Check, X, Loader } from 'lucide-react'
 import { useAuth } from '../contexts/AuthContext'
+import Toast from '../components/Toast'
+import { apiClient } from '../lib/api'
 
 interface OnboardingData {
   // Step 1: Account Setup
   name: string
+  username: string
   email: string
   password: string
   
@@ -49,8 +52,11 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
   const [currentStep, setCurrentStep] = useState(1)
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState('')
+  const [toast, setToast] = useState<{ message: string; type: 'success' | 'error' | 'info' } | null>(null)
+  const [usernameStatus, setUsernameStatus] = useState<'idle' | 'checking' | 'available' | 'taken' | 'error'>('idle')
   const [data, setData] = useState<OnboardingData>({
     name: '',
+    username: '',
     email: '',
     password: '',
     dateOfBirth: '',
@@ -63,6 +69,56 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
   const updateData = (field: keyof OnboardingData, value: string) => {
     setData(prev => ({ ...prev, [field]: value }))
     if (error) setError('')
+    
+    // Auto-generate username from name if name field changes
+    if (field === 'name' && !data.username) {
+      const generatedUsername = value.toLowerCase().replace(/[^a-z0-9]/g, '')
+      setData(prev => ({ ...prev, username: generatedUsername }))
+      if (generatedUsername.length >= 3) {
+        checkUsernameAvailability(generatedUsername)
+      }
+    }
+    
+    // Check username availability when username changes
+    if (field === 'username' && value.length >= 3) {
+      checkUsernameAvailability(value)
+    }
+  }
+
+  // Debounced username availability check
+  const checkUsernameAvailability = React.useCallback(
+    debounce(async (username: string) => {
+      if (username.length < 3) {
+        setUsernameStatus('idle')
+        return
+      }
+
+      setUsernameStatus('checking')
+      try {
+        console.log('🔍 Checking username availability:', username)
+        const response = await apiClient.get<{ available: boolean; message?: string }>(`/profiles/username-available/${username}`)
+        console.log('✅ Username check response:', response)
+        setUsernameStatus(response.available ? 'available' : 'taken')
+      } catch (error) {
+        console.error('❌ Error checking username:', error)
+        setUsernameStatus('error')
+        // Don't show toast - error will be shown below the field
+      }
+    }, 300),
+    []
+  )
+
+  // Debounce helper function
+  function debounce<T extends (...args: any[]) => any>(func: T, wait: number) {
+    let timeout: NodeJS.Timeout
+    return function executedFunction(...args: Parameters<T>) {
+      const later = () => {
+        clearTimeout(timeout)
+        func(...args)
+      }
+      clearTimeout(timeout)
+      timeout = setTimeout(later, wait)
+    }
   }
 
   const nextStep = () => {
@@ -78,6 +134,18 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
       case 1:
         if (!data.name.trim()) {
           setError('Name is required')
+          return false
+        }
+        if (!data.username.trim()) {
+          setError('Username is required')
+          return false
+        }
+        if (data.username.length < 3) {
+          setError('Username must be at least 3 characters')
+          return false
+        }
+        if (usernameStatus === 'taken') {
+          setError('Username is already taken')
           return false
         }
         if (!data.email.trim()) {
@@ -123,14 +191,19 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
   const handleFinish = async () => {
     if (!validateCurrentStep()) return
     
+    console.log('🚀 Starting signup process...', {
+      email: data.email,
+      username: data.username,
+      name: data.name
+    })
+    
+    setToast({ message: '⏳ Creating your account...', type: 'info' })
+    
     try {
-      // Create username from name (lowercase, no spaces)
-      const username = data.name.toLowerCase().replace(/[^a-z0-9]/g, '')
-      
       const { error } = await signUp(
         data.email,
         data.password,
-        username,
+        data.username, // Use the username from the form
         data.name,
         {
           dateOfBirth: data.dateOfBirth,
@@ -142,16 +215,49 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
       )
       
       if (error) {
-        setError(error.message || 'Failed to create account')
+        console.error('❌ Signup error:', error)
+        let errorMessage = error.message || 'Failed to create account'
+        
+        // Make error messages more user-friendly
+        if (errorMessage.includes('already')) {
+          errorMessage = '❌ This email or username is already registered. Please try logging in or use different credentials.'
+        } else if (errorMessage.includes('Invalid')) {
+          errorMessage = '❌ Please check your information and try again.'
+        } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+          errorMessage = '❌ Network error. Please check your connection and try again.'
+        } else {
+          errorMessage = `❌ ${errorMessage}`
+        }
+        
+        setError(errorMessage)
+        setToast({ message: errorMessage, type: 'error' })
       } else {
+        console.log('✅ Signup successful!')
         // Success! Add vibration feedback and excitement
         if ('vibrate' in navigator) {
           navigator.vibrate([100, 50, 100])
         }
-        // AuthContext will handle the redirect to camera screen
+        setToast({ message: '🎉 Account created successfully! Welcome to SnapHabit!', type: 'success' })
+        // Wait a bit to show the success message before redirect
+        setTimeout(() => {
+          console.log('✅ Redirecting to app...')
+        }, 2000) // Increased from 1500ms to 2000ms to ensure visibility
       }
     } catch (err: any) {
-      setError(err.message || 'Something went wrong')
+      console.error('💥 Signup exception:', err)
+      let errorMessage = err.message || 'Something went wrong'
+      
+      // Make error messages more user-friendly
+      if (errorMessage.includes('already')) {
+        errorMessage = '❌ This email or username is already registered. Please try logging in.'
+      } else if (errorMessage.includes('network') || errorMessage.includes('fetch')) {
+        errorMessage = '❌ Network error. Please check your connection and try again.'
+      } else {
+        errorMessage = `❌ ${errorMessage}`
+      }
+      
+      setError(errorMessage)
+      setToast({ message: errorMessage, type: 'error' })
     }
   }
 
@@ -185,6 +291,7 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
           >
             <h2 className="text-3xl font-bold text-white text-center mb-8">CREATE ACCOUNT</h2>
             
+            {/* Name Field */}
             <div>
               <input
                 type="text"
@@ -196,6 +303,66 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
               />
             </div>
             
+            {/* Username Field with Availability Check */}
+            <div>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Username"
+                  value={data.username}
+                  onChange={(e) => {
+                    const value = e.target.value.toLowerCase().replace(/[^a-z0-9_]/g, '')
+                    updateData('username', value)
+                  }}
+                  className={`w-full px-6 py-4 pr-12 bg-white/10 text-white rounded-2xl border transition-colors placeholder-gray-400 focus:outline-none ${
+                    usernameStatus === 'available' ? 'border-green-500' :
+                    usernameStatus === 'taken' ? 'border-red-500' :
+                    'border-gray-600 focus:border-snapchat-yellow'
+                  }`}
+                  maxLength={30}
+                  minLength={3}
+                />
+                {/* Username Status Indicator */}
+                <div className="absolute right-4 top-1/2 transform -translate-y-1/2">
+                  {usernameStatus === 'checking' && (
+                    <Loader className="w-5 h-5 text-gray-400 animate-spin" />
+                  )}
+                  {usernameStatus === 'available' && (
+                    <Check className="w-6 h-6 text-green-500" />
+                  )}
+                  {usernameStatus === 'taken' && (
+                    <X className="w-6 h-6 text-red-500" />
+                  )}
+                  {usernameStatus === 'error' && (
+                    <X className="w-6 h-6 text-orange-500" />
+                  )}
+                </div>
+              </div>
+              {/* Username Feedback - Compact, no extra space */}
+              {data.username.length > 0 && (
+                <div className="mt-2 px-2">
+                  {data.username.length < 3 ? (
+                    <p className="text-xs text-gray-400">
+                      Username must be at least 3 characters
+                    </p>
+                  ) : usernameStatus === 'available' ? (
+                    <p className="text-sm text-green-500 font-medium">
+                      ✓ Username is available
+                    </p>
+                  ) : usernameStatus === 'taken' ? (
+                    <p className="text-sm text-red-500 font-medium">
+                      ✗ Username is already taken
+                    </p>
+                  ) : usernameStatus === 'error' ? (
+                    <p className="text-sm text-orange-500 font-medium">
+                      ⚠️ Could not check availability. Please try again.
+                    </p>
+                  ) : null}
+                </div>
+              )}
+            </div>
+            
+            {/* Email Field */}
             <div>
               <input
                 type="email"
@@ -206,6 +373,7 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
               />
             </div>
             
+            {/* Password Field */}
             <div className="relative">
               <input
                 type={showPassword ? 'text' : 'password'}
@@ -219,6 +387,7 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="absolute right-4 top-1/2 transform -translate-y-1/2 text-gray-400"
+                aria-label="Toggle password visibility"
               >
                 {showPassword ? <EyeOff size={20} /> : <Eye size={20} />}
               </button>
@@ -350,23 +519,33 @@ export default function OnboardingScreen({ onBack }: OnboardingScreenProps) {
   }
 
   return (
-    <div className="w-full h-full bg-black flex flex-col">
+    <div className="w-full h-full bg-black flex flex-col pb-safe">
+      {/* Toast Notification */}
+      {toast && (
+        <Toast 
+          message={toast.message}
+          type={toast.type}
+          onClose={() => setToast(null)}
+        />
+      )}
+      
       {/* Back Button */}
       {onBack && currentStep === 1 && (
         <div className="absolute top-8 left-8 z-10">
           <button
             onClick={onBack}
             className="p-2 text-white hover:text-snapchat-yellow transition-colors"
+            aria-label="Go back"
           >
             <ArrowLeft size={24} />
           </button>
         </div>
       )}
       
-      <div className="flex-1 flex flex-col items-center justify-center px-8">
+      <div className="flex-1 flex flex-col items-center justify-center px-8 pb-24">
         {/* Logo */}
-        <div className="mb-8">
-          <div className="w-20 h-20 rounded-full bg-snapchat-yellow flex items-center justify-center mb-4">
+        <div className="mb-8 flex flex-col items-center">
+          <div className="w-20 h-20 rounded-full bg-snapchat-yellow flex items-center justify-center mb-4 mx-auto">
             <div className="w-12 h-12 rounded-full border-4 border-black flex items-center justify-center">
               <div className="w-6 h-6 rounded-full bg-black"></div>
             </div>
